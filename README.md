@@ -23,7 +23,7 @@
 ## Preview
 
 <p align="center">
-  <img src="docs/assets/app-screenshot.png" alt="Bypass Installer v4.1 — Application UI" width="860">
+  <img src="docs/assets/app-screenshot.png" alt="Bypass Installer v4.1.4 — Application UI" width="860">
 </p>
 
 <p align="center"><em>Obsidian Violet theme · custom title bar · compact 2×2 layout</em></p>
