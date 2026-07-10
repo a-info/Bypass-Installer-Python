@@ -46,5 +46,5 @@ exe = EXE(
     icon=['logo.ico'],
     manifest='bypass_installer.manifest',
     uac_admin=True,
-    version='scripts/version.txt',
+    version='version.txt',
 )
