@@ -2,7 +2,7 @@
   <img src="docs/assets/logo.png" alt="Bypass Installer" width="96">
 </p>
 
-<h1 align="center">Bypass Installer v4.1</h1>
+<h1 align="center">Bypass Installer v4.1.2</h1>
 
 <p align="center">
   Certificate injection &amp; proxy tool for Android emulators<br>
@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1">
-    <img src="https://img.shields.io/github/v/release/a-info/Bypass-Installer-Python?label=Download%20v4.1&style=for-the-badge&color=c084fc" alt="Download v4.1">
+  <a href="https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1.2">
+    <img src="https://img.shields.io/github/v/release/a-info/Bypass-Installer-Python?label=Download%20v4.1.2&style=for-the-badge&color=c084fc" alt="Download v4.1.2">
   </a>
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
@@ -36,7 +36,7 @@
 
 | | |
 |---|---|
-| **Version** | 4.1 |
+| **Version** | 4.1.2 |
 | **Author** | [a-info](https://github.com/a-info) |
 | **Email** | who.is.a.dev@hotmail.com |
 | **Repo** | [github.com/a-info/Bypass-Installer-Python](https://github.com/a-info/Bypass-Installer-Python) |
@@ -88,14 +88,14 @@
 
 | File | Description |
 |------|-------------|
-| [`Bypass-Installer-v4.1.exe`](https://github.com/a-info/Bypass-Installer-Python/releases/download/v4.1/Bypass-Installer-v4.1.exe) | Portable single-file app (~21 MB) |
+| [`Bypass-Installer-v4.1.2.exe`](https://github.com/a-info/Bypass-Installer-Python/releases/download/v4.1.2/Bypass-Installer-v4.1.2.exe) | Portable single-file app (~20 MB) |
 
 ### EXE details
 
 | Property | Value |
 |----------|-------|
 | **Name** | Bypass Installer |
-| **Version** | 4.1 |
+| **Version** | 4.1.2 |
 | **Size** | ~21 MB |
 | **Architecture** | Windows 64-bit |
 | **Admin required** | Yes (UAC prompt on launch) |
@@ -106,7 +106,7 @@
 
 ### How to run the EXE
 
-1. Download `Bypass-Installer-v4.1.exe` from [Releases v4.1](https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1)
+1. Download `Bypass-Installer-v4.1.2.exe` from [Releases v4.1.2](https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1.2)
 2. Double-click the file
 3. Click **Yes** on the UAC Administrator prompt
 4. The app opens centered with a taskbar icon
@@ -272,6 +272,8 @@ The spec file includes `uac_admin=True` so the exe requests Administrator on lau
 
 | Version | Highlights |
 |---------|------------|
+| **v4.1.2** | EXE auto-admin UAC fix, frozen build button click fix, uac_admin manifest |
+| **v4.1.1** | ADB connect fix, proxy Apply/Find/Copy fixes |
 | **v4.1** | Find Proxy button, copy IP:port, connected proxy status chip |
 | **v4.0** | Admin UAC fix, taskbar icon, transparent logo, ADB logging, Obsidian UI |
 | v3.0 | Previous release |
@@ -295,5 +297,5 @@ MIT License — see [LICENSE.txt](LICENSE.txt)
 ---
 
 <p align="center">
-  Created by <a href="https://github.com/a-info">a-info</a> · Bypass Installer v4.1
+  Created by <a href="https://github.com/a-info">a-info</a> · Bypass Installer v4.1.2
 </p>
