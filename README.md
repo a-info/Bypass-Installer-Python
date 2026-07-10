@@ -2,7 +2,7 @@
   <img src="docs/assets/logo.png" alt="Bypass Installer" width="96">
 </p>
 
-<h1 align="center">Bypass Installer v4.1.2</h1>
+<h1 align="center">Bypass Installer v4.1.4</h1>
 
 <p align="center">
   Certificate injection &amp; proxy tool for Android emulators<br>
@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1.2">
-    <img src="https://img.shields.io/github/v/release/a-info/Bypass-Installer-Python?label=Download%20v4.1.2&style=for-the-badge&color=c084fc" alt="Download v4.1.2">
+  <a href="https://github.com/a-info/Bypass-Installer-Python/releases/tag/v4.1.4">
+    <img src="https://img.shields.io/github/v/release/a-info/Bypass-Installer-Python?label=Download%20v4.1.4&style=for-the-badge&color=c084fc" alt="Download v4.1.4">
   </a>
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
@@ -36,7 +36,7 @@
 
 | | |
 |---|---|
-| **Version** | 4.1.2 |
+| **Version** | 4.1.4 |
 | **Author** | [a-info](https://github.com/a-info) |
 | **Email** | who.is.a.dev@hotmail.com |
 | **Repo** | [github.com/a-info/Bypass-Installer-Python](https://github.com/a-info/Bypass-Installer-Python) |
@@ -88,14 +88,14 @@
 
 | File | Description |
 |------|-------------|
-| [`Bypass-Installer-v4.1.2.exe`](https://github.com/a-info/Bypass-Installer-Python/releases/download/v4.1.2/Bypass-Installer-v4.1.2.exe) | Portable single-file app (~20 MB) |
+| [`Bypass-Installer-v4.1.4.exe`](https://github.com/a-info/Bypass-Installer-Python/releases/download/v4.1.4/Bypass-Installer-v4.1.4.exe) | Portable single-file app (~20 MB) |
 
 ### EXE details
 
 | Property | Value |
 |----------|-------|
 | **Name** | Bypass Installer |
-| **Version** | 4.1.2 |
+| **Version** | 4.1.4 |
 | **Size** | ~21 MB |
 | **Architecture** | Windows 64-bit |
 | **Admin required** | Yes (UAC prompt on launch) |
