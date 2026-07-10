@@ -138,7 +138,6 @@ def get_local_ipv4() -> str:
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # No traffic is sent; this is only used to resolve local interface IP.
         sock.connect(("8.8.8.8", 80))
         ip = sock.getsockname()[0]
         if ip and not ip.startswith("127."):
@@ -148,6 +147,28 @@ def get_local_ipv4() -> str:
     finally:
         if sock:
             sock.close()
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "(Get-NetIPAddress -AddressFamily IPv4 | "
+                "Where-Object { $_.IPAddress -notlike '127.*' } | "
+                "Select-Object -First 1).IPAddress",
+            ],
+            capture_output=True, text=True, timeout=5, creationflags=flags,
+        )
+        ip = (result.stdout or "").strip()
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
     return "127.0.0.1"
 
 class EmulatorType(Enum):
@@ -296,7 +317,25 @@ class CertificateManager:
         return path.strip().strip('"').strip("'")
 
     def _adb_target(self) -> str:
-        return f"127.0.0.1:{self.adb_port}"
+        return f"127.0.0.1:{self.adb_port.strip()}"
+
+    def _list_online_devices(self) -> List[str]:
+        try:
+            res = self._run_adb("devices", timeout=10)
+            devices: List[str] = []
+            for line in (res.stdout or "").splitlines():
+                line = line.strip()
+                if line and not line.lower().startswith("list of devices"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == "device":
+                        devices.append(parts[0])
+            return devices
+        except Exception:
+            return []
+
+    def _is_target_online(self) -> bool:
+        target = self._adb_target()
+        return any(d == target or d.endswith(f":{self.adb_port.strip()}") for d in self._list_online_devices())
 
     def _run_adb(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
         if not os.path.isfile(self.adb_path):
@@ -486,7 +525,9 @@ class CertificateManager:
                     continue
                 with open(config_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                matches = re.findall(r'adb_port="(\d+)"', content)
+                matches = re.findall(r'(?:^|\.)adb_port="(\d+)"', content, re.MULTILINE)
+                if not matches:
+                    matches = re.findall(r'adb_port="(\d+)"', content)
                 if matches:
                     return matches[-1]
         except Exception as e:
@@ -544,15 +585,23 @@ class CertificateManager:
 
             out = (result.stdout or "").strip()
             err = (result.stderr or "").strip()
+            combined = f"{out}\n{err}".lower()
             if out:
                 log(f"Reply: {out}")
             if err:
                 log(f"ADB stderr: {err}", "err" if result.returncode != 0 else "warn")
 
-            connected = "connected" in out.lower() or "already connected" in out.lower()
+            connected = (
+                "connected" in combined
+                or "already connected" in combined
+                or self._is_target_online()
+            )
             if connected:
                 log("Waiting for device...")
-                self._run_adb("-s", target, "wait-for-device", timeout=10)
+                try:
+                    self._run_adb("-s", target, "wait-for-device", timeout=20)
+                except subprocess.TimeoutExpired:
+                    log("wait-for-device timed out — checking device state...", "warn")
                 if self.is_adb_ready():
                     self.is_connected = True
                     log(f"✓ Connected on port {self.adb_port}", "ok")
@@ -596,15 +645,18 @@ class CertificateManager:
 
     def is_adb_ready(self) -> bool:
         """Check whether current ADB target is reachable and responsive."""
-        target = f"127.0.0.1:{self.adb_port}"
+        if not self._is_target_online():
+            return False
+        target = self._adb_target()
         try:
-            state_res = self._run_adb("-s", target, "get-state", timeout=5)
-            if "device" not in (state_res.stdout or "").lower():
-                return False
-            ping_res = self._run_adb("-s", target, "shell", "echo ok", timeout=5)
+            state_res = self._run_adb("-s", target, "get-state", timeout=8)
+            state_out = (state_res.stdout or state_res.stderr or "").lower()
+            if "device" in state_out:
+                return True
+            ping_res = self._run_adb("-s", target, "shell", "echo ok", timeout=8)
             return "ok" in (ping_res.stdout or "").lower()
         except Exception:
-            return False
+            return self._is_target_online()
 
     def ensure_adb_connection(self, log_cb=None) -> bool:
         """Guarantee a usable ADB session, auto-reconnecting when stale."""
@@ -914,16 +966,39 @@ class CertificateManager:
 
     def get_device_proxy(self) -> Optional[str]:
         """Read active HTTP proxy from the connected emulator."""
-        if not self.is_connected or not self.is_adb_ready():
+        if not self.is_connected:
             return None
         try:
             res = self._adb_shell("settings get global http_proxy", timeout=10)
-            addr = (res.stdout or "").strip()
-            if addr and addr.lower() not in ("null", ":0", "0"):
+            addr = (res.stdout or res.stderr or "").strip()
+            if addr and addr.lower() not in ("null", ":0", "0", "none"):
                 return addr
         except Exception:
             pass
         return None
+
+    def _put_device_proxy(self, addr: str) -> bool:
+        """Apply proxy on device — tries direct shell then BlueStacks su."""
+        cmds = [
+            f"settings put global http_proxy {addr}",
+            f"/boot/android/android/system/xbin/bstk/su -c 'settings put global http_proxy {addr}'",
+            f"su -c 'settings put global http_proxy {addr}'",
+        ]
+        last_err = ""
+        for cmd in cmds:
+            res = self._adb_shell(cmd, timeout=15)
+            if res.returncode == 0:
+                time.sleep(0.3)
+                current = self.get_device_proxy()
+                if current and current not in (":0", "null") and (
+                    current == addr or addr in current or current in addr
+                ):
+                    return True
+                if res.returncode == 0:
+                    return True
+            last_err = self._adb_err(res) or last_err
+        self.last_error = last_err or "Proxy command failed on device"
+        return False
 
     def apply_proxy(self, log_cb=None) -> bool:
         def log(msg: str, color: Optional[str] = None):
@@ -938,9 +1013,8 @@ class CertificateManager:
             addr = self.proxy_address.strip()
             if not addr:
                 addr = self.find_proxy_address()
-            res = self._adb_shell(f"settings put global http_proxy {addr}", timeout=10)
-            if res.returncode != 0:
-                self.last_error = self._adb_err(res) or "Proxy command failed"
+            log(f"Applying proxy → {addr}")
+            if not self._put_device_proxy(addr):
                 log(f"✕ {self.last_error}", "err")
                 return False
             self.proxy_applied = True
@@ -964,9 +1038,11 @@ class CertificateManager:
         try:
             su = "/boot/android/android/system/xbin/bstk/su"
             cmds = [
+                "settings put global http_proxy :0",
                 f"{su} -c 'settings put global http_proxy :0'",
                 f"{su} -c 'settings delete global global_http_proxy_host'",
                 f"{su} -c 'settings delete global global_http_proxy_port'",
+                "su -c 'settings put global http_proxy :0'",
             ]
             for c in cmds:
                 self._adb_shell(c, timeout=10)
@@ -1348,7 +1424,7 @@ class App(ctk.CTk):
         admin_col = SUCCESS if is_admin() else WARN
         ctk.CTkLabel(badges, text=f"● {'Admin' if is_admin() else 'User'}",
                      font=FONT_MICRO, text_color=admin_col).pack(side="right", padx=(8, 0))
-        ctk.CTkLabel(badges, text="v4.1", font=FONT_MICRO,
+        ctk.CTkLabel(badges, text="v4.1.1", font=FONT_MICRO,
                      text_color=ACCENT).pack(side="right", padx=(8, 0))
 
         self._bind_window_drag(self.title_bar)
@@ -1550,28 +1626,35 @@ class App(ctk.CTk):
                     pass
         self.log_text.see("end")
 
-    def _refresh_conn_ui(self):
+    def _sync_from_ui(self):
+        """Keep manager state aligned with UI fields before ADB/proxy ops."""
+        self.cert_manager.adb_port = self.port_entry.get().strip() or "5555"
+        self.cert_manager.proxy_address = self.proxy_entry.get().strip()
+
+    def _refresh_conn_ui(self, check_device_proxy: bool = False):
         if self.cert_manager.is_connected:
             self.status_chip.set(f"Connected · port {self.cert_manager.adb_port}", SUCCESS)
             self.conn_btn.configure(text="Disconnect ADB")
-            device_proxy = self.cert_manager.get_device_proxy()
-            if device_proxy and not self.cert_manager.proxy_applied:
-                self.cert_manager.active_proxy = device_proxy
+            if check_device_proxy:
+                device_proxy = self.cert_manager.get_device_proxy()
+                if device_proxy and not self.cert_manager.proxy_applied:
+                    self.cert_manager.active_proxy = device_proxy
         else:
             self.status_chip.set("Offline — not connected", DANGER)
             self.conn_btn.configure(text="Connect ADB")
-        self._refresh_proxy_ui()
+        self._refresh_proxy_ui(check_device=check_device_proxy)
 
-    def _refresh_proxy_ui(self):
+    def _refresh_proxy_ui(self, check_device: bool = False):
         if self.cert_manager.proxy_applied and self.cert_manager.active_proxy:
             self.proxy_status_chip.set(
                 f"Connected · {self.cert_manager.active_proxy}", SUCCESS
             )
             return
-        device_proxy = self.cert_manager.get_device_proxy()
-        if device_proxy:
-            self.proxy_status_chip.set(f"Device · {device_proxy}", WARN)
-            return
+        if check_device and self.cert_manager.is_connected:
+            device_proxy = self.cert_manager.get_device_proxy()
+            if device_proxy:
+                self.proxy_status_chip.set(f"Device · {device_proxy}", WARN)
+                return
         if self.cert_manager.is_connected:
             self.proxy_status_chip.set("ADB linked — no proxy set", TEXT_DIM)
         else:
@@ -1580,12 +1663,17 @@ class App(ctk.CTk):
     def _proxy_text_to_copy(self) -> str:
         if self.cert_manager.proxy_applied and self.cert_manager.active_proxy:
             return self.cert_manager.active_proxy
-        device_proxy = self.cert_manager.get_device_proxy()
-        if device_proxy:
-            return device_proxy
-        return self.proxy_entry.get().strip()
+        entry_text = self.proxy_entry.get().strip()
+        if entry_text:
+            return entry_text
+        if self.cert_manager.is_connected:
+            device_proxy = self.cert_manager.get_device_proxy()
+            if device_proxy:
+                return device_proxy
+        return ""
 
     def find_proxy_action(self):
+        self._sync_from_ui()
         current = self.proxy_entry.get().strip()
         port = "8080"
         if ":" in current:
@@ -1594,26 +1682,32 @@ class App(ctk.CTk):
         self.proxy_entry.delete(0, "end")
         self.proxy_entry.insert(0, new_addr)
         self.cert_manager.proxy_address = new_addr
+        self._refresh_proxy_ui()
         self.add_log(f"Proxy found: {new_addr}", "ok")
 
     def copy_proxy_action(self):
+        self._sync_from_ui()
         text = self._proxy_text_to_copy()
         if not text:
-            self.add_log("Nothing to copy — use Find Proxy or enter an address.", "warn")
+            self.add_log("Nothing to copy — click Find Proxy or enter IP:port.", "warn")
             return
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        self.add_log(f"Copied to clipboard: {text}", "ok")
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update_idletasks()
+            self.add_log(f"Copied to clipboard: {text}", "ok")
+        except tk.TclError as e:
+            self.add_log(f"✕ Copy failed: {e}", "err")
 
     def start_auto_connect(self):
         threading.Thread(target=self.auto_connect, daemon=True).start()
 
     def auto_connect(self):
         try:
+            self._sync_from_ui()
             self.add_log("Auto-connect starting...")
-            self.cert_manager.adb_port = self.port_entry.get().strip() or "5555"
             self.cert_manager.connect_adb(log_cb=self.add_log)
-            self.run_on_ui_thread(self._refresh_conn_ui)
+            self.run_on_ui_thread(lambda: self._refresh_conn_ui(check_device_proxy=True))
         except Exception as e:
             logger.exception("Auto connect crashed")
             self.add_log(f"✕ Auto-connect crash: {e}", "err")
@@ -1664,29 +1758,29 @@ class App(ctk.CTk):
                     if self.cert_manager.is_connected:
                         break
                     attempt += 1
-                    self.cert_manager.adb_port = self.port_entry.get().strip() or self.cert_manager.adb_port
                     if self.cert_manager.connect_adb(log_cb=self.add_log):
-                        self.run_on_ui_thread(self._refresh_conn_ui)
+                        self.run_on_ui_thread(lambda: self._refresh_conn_ui(check_device_proxy=True))
                         break
                     self.add_log(f"Retry {attempt} — waiting 5s...", "warn")
                     time.sleep(5)
                 if not self.cert_manager.is_connected:
                     self.add_log("✕ ADB auto-link timed out (90s)", "err")
                     self.add_log("Tip: click Connect ADB after emulator fully loads", "warn")
+            self._sync_from_ui()
             threading.Thread(target=poll_adb, daemon=True).start()
         else:
             self.add_log(f"Launch failed: {self.cert_manager.last_error}")
 
     def toggle_conn_action(self):
         def task():
-            self.cert_manager.adb_port = self.port_entry.get().strip() or "5555"
+            self._sync_from_ui()
             if self.cert_manager.is_connected:
                 self.cert_manager.disconnect_adb()
                 self.add_log("ADB disconnected.", "warn")
                 self.run_on_ui_thread(self._refresh_conn_ui)
                 return
             self.cert_manager.connect_adb(log_cb=self.add_log)
-            self.run_on_ui_thread(self._refresh_conn_ui)
+            self.run_on_ui_thread(lambda: self._refresh_conn_ui(check_device_proxy=True))
         threading.Thread(target=task, daemon=True).start()
 
     def sync_cert_hash_from_ui(self):
@@ -1746,27 +1840,38 @@ class App(ctk.CTk):
         threading.Thread(target=task, daemon=True).start()
 
     def apply_proxy_action(self):
-        self.cert_manager.proxy_address = self.proxy_entry.get().strip()
-        if self.cert_manager.apply_proxy(log_cb=self.add_log):
-            self.proxy_entry.delete(0, "end")
-            self.proxy_entry.insert(0, self.cert_manager.active_proxy)
-            self._refresh_proxy_ui()
-            self.add_log(f"Proxy active: {self.cert_manager.active_proxy}", "ok")
-        else:
-            self.add_log(f"Proxy failed: {self.cert_manager.last_error}", "err")
+        def task():
+            self._sync_from_ui()
+            if self.cert_manager.apply_proxy(log_cb=self.add_log):
+                def on_ok():
+                    self.proxy_entry.delete(0, "end")
+                    self.proxy_entry.insert(0, self.cert_manager.active_proxy)
+                    self._refresh_proxy_ui()
+                    self.add_log(f"Proxy active: {self.cert_manager.active_proxy}", "ok")
+                self.run_on_ui_thread(on_ok)
+            else:
+                self.add_log(f"Proxy failed: {self.cert_manager.last_error}", "err")
+        threading.Thread(target=task, daemon=True).start()
 
     def clear_proxy_action(self):
-        if self.cert_manager.clear_proxy(log_cb=self.add_log):
-            self._refresh_proxy_ui()
-            self.add_log("Proxy cleared.", "ok")
-        else:
-            self.add_log(f"Proxy clear failed: {self.cert_manager.last_error}", "err")
+        def task():
+            self._sync_from_ui()
+            if self.cert_manager.clear_proxy(log_cb=self.add_log):
+                self.run_on_ui_thread(self._refresh_proxy_ui)
+                self.add_log("Proxy cleared.", "ok")
+            else:
+                self.add_log(f"Proxy clear failed: {self.cert_manager.last_error}", "err")
+        threading.Thread(target=task, daemon=True).start()
 
     def update_status_loop(self):
+        lost = False
         if self.cert_manager.is_connected and not self.cert_manager.is_adb_ready():
             self.cert_manager.is_connected = False
-            self.add_log("✕ ADB session lost — reconnect needed", "err")
+            self.cert_manager.proxy_applied = False
+            lost = True
         self._refresh_conn_ui()
+        if lost:
+            self.add_log("✕ ADB session lost — reconnect needed", "err")
         self.after(3000, self.update_status_loop)
 
 
