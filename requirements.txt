@@ -1,0 +1,4 @@
+customtkinter
+cryptography
+pyinstaller
+Pillow
