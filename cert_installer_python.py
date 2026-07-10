@@ -1462,7 +1462,7 @@ class App(ctk.CTk):
         admin_col = SUCCESS if is_admin() else WARN
         ctk.CTkLabel(badges, text=f"● {'Admin' if is_admin() else 'User'}",
                      font=FONT_MICRO, text_color=admin_col).pack(side="right", padx=(8, 0))
-        ctk.CTkLabel(badges, text="v4.1.3", font=FONT_MICRO,
+        ctk.CTkLabel(badges, text="v4.1.4", font=FONT_MICRO,
                      text_color=ACCENT).pack(side="right", padx=(8, 0))
 
         self._bind_window_drag(self.title_bar)
