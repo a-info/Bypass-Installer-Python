@@ -215,31 +215,17 @@ python cert_installer_python.py
 
 > Requires Administrator. The app will re-launch with UAC if not elevated.
 
-### 3. Build EXE with PyInstaller
+### 3. Build & Sign EXE
+
+Use the automated build script which runs PyInstaller and signs the executable to bypass Windows Defender:
 
 ```powershell
-python -m PyInstaller "Bypass Installer.spec"
-```
-
-Or full command:
-
-```powershell
-python -m PyInstaller ^
-  --onefile ^
-  --noconsole ^
-  --name "Bypass Installer" ^
-  --icon logo.ico ^
-  --manifest bypass_installer.manifest ^
-  --collect-all customtkinter ^
-  --add-data "logo.ico;." ^
-  --add-data "logo.png;." ^
-  --add-data "LICENSE.txt;." ^
-  cert_installer_python.py
+python build.py
 ```
 
 **Output:** `dist\Bypass Installer.exe`
 
-The spec file includes `uac_admin=True` so the exe requests Administrator on launch.
+The spec file includes `uac_admin=True` and `version='version.txt'` so the exe requests Administrator on launch and contains correct properties.
 
 ---
 
@@ -272,6 +258,7 @@ The spec file includes `uac_admin=True` so the exe requests Administrator on lau
 
 | Version | Highlights |
 |---------|------------|
+| **v4.1.4** | Automated code signing, version properties, automated build script |
 | **v4.1.2** | EXE auto-admin UAC fix, frozen build button click fix, uac_admin manifest |
 | **v4.1.1** | ADB connect fix, proxy Apply/Find/Copy fixes |
 | **v4.1** | Find Proxy button, copy IP:port, connected proxy status chip |
@@ -297,5 +284,5 @@ MIT License — see [LICENSE.txt](LICENSE.txt)
 ---
 
 <p align="center">
-  Created by <a href="https://github.com/a-info">a-info</a> · Bypass Installer v4.1.2
+  Created by <a href="https://github.com/a-info">a-info</a> · Bypass Installer v4.1.4
 </p>
