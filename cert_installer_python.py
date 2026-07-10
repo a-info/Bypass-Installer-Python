@@ -1144,19 +1144,6 @@ class GlowButton(ctk.CTkButton):
             kwargs["border_width"] = 1
             kwargs["border_color"] = BORDER
         super().__init__(master, **kwargs)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-
-    def _on_enter(self, _=None):
-        if self._variant == "outline":
-            self.configure(fg_color=self._hover_fg, border_width=1, border_color=ACCENT)
-        else:
-            self.configure(fg_color=self._hover_fg, border_width=0)
-
-    def _on_leave(self, _=None):
-        border = 1 if self._variant == "outline" else 0
-        border_col = BORDER if self._variant == "outline" else self._glow
-        self.configure(fg_color=self._base_fg, border_width=border, border_color=border_col)
 
 
 class SectionCard(ctk.CTkFrame):
@@ -1645,6 +1632,7 @@ class App(ctk.CTk):
             self.after(0, lambda: fn(*args, **kwargs))
 
     def add_log(self, msg, color=None):
+        print(f"LOG: {msg}")
         if threading.current_thread() is not threading.main_thread():
             self.run_on_ui_thread(self.add_log, msg, color)
             return
@@ -1914,6 +1902,32 @@ class App(ctk.CTk):
                 self.add_log(f"Proxy clear failed: {self.cert_manager.last_error}", "err")
         threading.Thread(target=task, daemon=True).start()
 
+    def find_proxy_action(self):
+        def task():
+            if not self.cert_manager.is_connected:
+                self.add_log("✕ Cannot find proxy: ADB not connected.", "err")
+                return
+            self.add_log("Reading proxy from device...")
+            proxy = self.cert_manager.get_device_proxy()
+            def on_done():
+                self.proxy_entry.delete(0, "end")
+                if proxy:
+                    self.proxy_entry.insert(0, proxy)
+                    self.add_log(f"Found active proxy: {proxy}", "ok")
+                else:
+                    self.proxy_entry.insert(0, "0")
+                    self.add_log("No proxy found on device (0).", "warn")
+            self.run_on_ui_thread(on_done)
+        threading.Thread(target=task, daemon=True).start()
+
+    def copy_proxy_action(self):
+        proxy = self.proxy_entry.get().strip()
+        if not proxy or proxy == "0":
+            self.add_log("No proxy address to copy.", "warn")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(proxy)
+        self.add_log("Proxy copied to clipboard.", "ok")
     def update_status_loop(self):
         lost = False
         if self.cert_manager.is_connected and not self.cert_manager.is_adb_ready():
