@@ -15,6 +15,7 @@ from tkinter import filedialog
 import re
 import base64
 import shutil
+import multiprocessing
 from pathlib import Path
 from enum import Enum
 from typing import Optional, List, Dict, Tuple, Any, cast, TYPE_CHECKING
@@ -81,38 +82,65 @@ RADIUS  = 6
 PAD     = 8
 GAP     = 6
 
+def crash_log_path() -> str:
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "bypass_installer.log")
+
+def log_fatal(msg: str) -> None:
+    try:
+        with open(crash_log_path(), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {msg}\n")
+    except Exception:
+        pass
+
 def is_admin():
     try:
-        return ctypes.windll.shell32.IsUserAnAdmin() # type: ignore
-    except:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore
+    except Exception:
         return False
 
 def ensure_admin():
     """Re-launch the process with UAC elevation if not already admin."""
+    if sys.platform != "win32":
+        return
     if is_admin():
         return
     try:
         if getattr(sys, "frozen", False):
-            executable = sys.executable
-            args = " ".join(f'"{arg}"' if " " in arg else arg for arg in sys.argv[1:])
+            executable = os.path.abspath(sys.executable)
+            work_dir = os.path.dirname(executable)
+            params = subprocess.list2cmdline(sys.argv[1:]) if len(sys.argv) > 1 else ""
         else:
             executable = sys.executable
+            work_dir = os.path.dirname(os.path.abspath(__file__))
             script = os.path.abspath(sys.argv[0])
-            rest = " ".join(f'"{arg}"' if " " in arg else arg for arg in sys.argv[1:])
-            args = f'"{script}"' + (f" {rest}" if rest else "")
+            params = subprocess.list2cmdline([script] + sys.argv[1:])
 
-        ret = ctypes.windll.shell32.ShellExecuteW(  # type: ignore
-            None, "runas", executable, args, None, 1
-        )
+        ret = int(ctypes.windll.shell32.ShellExecuteW(  # type: ignore
+            None, "runas", executable, params or None, work_dir, 1
+        ))
         if ret <= 32:
             ctypes.windll.user32.MessageBoxW(  # type: ignore
                 0,
-                "Administrator privileges are required to run Bypass Installer.",
+                "Administrator privileges are required to run Bypass Installer.\n"
+                "Please right-click the EXE and choose 'Run as administrator'.",
                 "Bypass Installer",
                 0x10,
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_fatal(f"ensure_admin failed: {exc}")
+        try:
+            ctypes.windll.user32.MessageBoxW(  # type: ignore
+                0,
+                f"Could not request Administrator access:\n{exc}",
+                "Bypass Installer",
+                0x10,
+            )
+        except Exception:
+            pass
     sys.exit(0)
 
 def bring_window_to_front(window: tk.Misc) -> None:
@@ -255,25 +283,42 @@ def set_app_user_model_id() -> None:
 def _win_hwnd(window: tk.Misc) -> int:
     window.update_idletasks()
     hwnd = int(window.winfo_id())
+    try:
+        GA_ROOT = 2
+        root = ctypes.windll.user32.GetAncestor(hwnd, GA_ROOT)  # type: ignore
+        if root:
+            return int(root)
+    except Exception:
+        pass
     parent = ctypes.windll.user32.GetParent(hwnd)  # type: ignore
     return int(parent) if parent else hwnd
 
 def apply_native_frameless(window: tk.Misc) -> None:
-    """Borderless look while keeping a normal Windows taskbar button."""
+    """Borderless look while keeping a normal Windows taskbar button and clickable UI."""
     if sys.platform != "win32":
-        window.overrideredirect(True)
         return
     try:
         hwnd = _win_hwnd(window)
+        user32 = ctypes.windll.user32
         gwl_style = -16
+        gwl_exstyle = -20
         ws_caption = 0x00C00000
-        ws_thickframe = 0x00040000
         ws_sysmenu = 0x00080000
         ws_maximizebox = 0x00010000
-        user32 = ctypes.windll.user32
+        ws_minimizebox = 0x00020000
+        ws_ex_appwindow = 0x00040000
+        ws_ex_toolwindow = 0x00000080
+
         style = user32.GetWindowLongW(hwnd, gwl_style)
-        style &= ~(ws_caption | ws_thickframe | ws_sysmenu | ws_maximizebox)
+        style &= ~(ws_caption | ws_sysmenu | ws_maximizebox)
+        style |= ws_minimizebox
         user32.SetWindowLongW(hwnd, gwl_style, style)
+
+        ex_style = user32.GetWindowLongW(hwnd, gwl_exstyle)
+        ex_style &= ~ws_ex_toolwindow
+        ex_style |= ws_ex_appwindow
+        user32.SetWindowLongW(hwnd, gwl_exstyle, ex_style)
+
         swp_nomove = 0x0002
         swp_nosize = 0x0001
         swp_nozorder = 0x0004
@@ -282,8 +327,8 @@ def apply_native_frameless(window: tk.Misc) -> None:
             hwnd, 0, 0, 0, 0, 0,
             swp_nomove | swp_nosize | swp_nozorder | swp_framechanged,
         )
-    except Exception:
-        window.overrideredirect(True)
+    except Exception as exc:
+        log_fatal(f"apply_native_frameless failed: {exc}")
 
 def ensure_taskbar_icon(window: tk.Misc) -> None:
     """Legacy hook — native frameless keeps the taskbar button visible."""
@@ -1326,19 +1371,20 @@ class App(ctk.CTk):
 
         self._build_ui()
         self.update_idletasks()
+        self.deiconify()
         apply_native_frameless(self)
         ensure_taskbar_icon(self)
         set_window_icon(self)
-        self.deiconify()
-
-        self.emu_option.set("BlueStacks App Player")
-        self.on_emu_change("BlueStacks App Player")
 
         self.after(50, lambda: apply_native_frameless(self))
         self.after(100, lambda: bring_window_to_front(self))
-        self.after(300, lambda: bring_window_to_front(self))
-        self.after(1000, self.start_auto_connect)
+        self.after(200, self._init_emulator_selection)
+        self.after(1500, self.start_auto_connect)
         self.after(3000, self.update_status_loop)
+
+    def _init_emulator_selection(self):
+        self.emu_option.set("BlueStacks App Player")
+        self.on_emu_change("BlueStacks App Player")
 
     def _center_on_screen(self):
         self.update_idletasks()
@@ -1365,6 +1411,11 @@ class App(ctk.CTk):
     def _start_move(self, event):
         if self._is_title_control(event.widget):
             return
+        w = event.widget
+        while w is not None:
+            if isinstance(w, (ctk.CTkButton, ctk.CTkEntry, ctk.CTkTextbox, ctk.CTkOptionMenu)):
+                return
+            w = getattr(w, "master", None)
         self._drag_x = event.x_root - self.winfo_x()
         self._drag_y = event.y_root - self.winfo_y()
         self._dragging = True
@@ -1424,7 +1475,7 @@ class App(ctk.CTk):
         admin_col = SUCCESS if is_admin() else WARN
         ctk.CTkLabel(badges, text=f"● {'Admin' if is_admin() else 'User'}",
                      font=FONT_MICRO, text_color=admin_col).pack(side="right", padx=(8, 0))
-        ctk.CTkLabel(badges, text="v4.1.1", font=FONT_MICRO,
+        ctk.CTkLabel(badges, text="v4.1.2", font=FONT_MICRO,
                      text_color=ACCENT).pack(side="right", padx=(8, 0))
 
         self._bind_window_drag(self.title_bar)
@@ -1876,14 +1927,16 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     try:
         set_app_user_model_id()
-        ensure_admin()   # Re-launch with UAC elevation if not admin
+        ensure_admin()
         app = App()
         bring_window_to_front(app)
         app.mainloop()
     except Exception as exc:
         logger.exception("Fatal startup/runtime error")
+        log_fatal(f"Fatal error: {exc}")
         try:
             import tkinter.messagebox as messagebox
             messagebox.showerror("Bypass Installer Error", f"Application crashed:\n{exc}")
