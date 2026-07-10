@@ -271,6 +271,15 @@ The spec file includes `uac_admin=True` and `version='version.txt'` so the exe r
 
 ---
 
+## Contributors
+
+- **[a-info](https://github.com/a-info)** — Creator & Lead Developer
+- **Cursor Agent** — AI Assistant
+- **Claude Code** — AI Assistant
+- **Antigravity** — AI Assistant
+
+---
+
 ## Disclaimer
 
 This tool is for **educational and testing purposes only**. Modifying emulator system partitions can cause instability. Use at your own risk. Always back up important data.
